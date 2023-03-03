@@ -3,16 +3,21 @@
 #
 cmake_minimum_required (VERSION 3.8)
 project ("XPBD")
-include_directories(${PROJECT_SOURCE_DIR}/include)
+find_package(CUDA REQUIRED)
+include_directories(${PROJECT_SOURCE_DIR}/Include)
 link_directories(lib)
-set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY_DEBUG ${CMAKE_BINARY_DIR}/lib)
-set(CMAKE_LIBRARY_OUTPUT_DIRECTORY_DEBUG ${CMAKE_BINARY_DIR}/lib)
-set(CMAKE_RUNTIME_OUTPUT_DIRECTORY_DEBUG ${CMAKE_BINARY_DIR}/bin)
-set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY_RELEASE ${CMAKE_BINARY_DIR}/lib)
-set(CMAKE_LIBRARY_OUTPUT_DIRECTORY_RELEASE ${CMAKE_BINARY_DIR}/lib)
-set(CMAKE_RUNTIME_OUTPUT_DIRECTORY_RELEASE ${CMAKE_BINARY_DIR}/bin)
-file(COPY "lib" DESTINATION ${CMAKE_BINARY_DIR})
-file(GLOB_RECURSE  src_dir "./src/*.c" "./src/*.h" "./src/*.cpp" )
-add_executable (XPBD "XPBD.cpp" ${src_dir})
-target_link_libraries(XPBD glfw3  opengl32)
+CUDA_add_executable (XPBD  Cloth.cu glad.c Model.cu XPBD.cu)
+target_include_directories(XPBD PUBLIC ${PROJECT_BINARY_DIR})
+target_link_libraries(XPBD glfw3  opengl32 kernel32.lib
+user32.lib
+gdi32.lib
+winspool.lib
+comdlg32.lib
+advapi32.lib
+shell32.lib
+ole32.lib
+oleaut32.lib
+uuid.lib
+odbc32.lib
+odbccp32.lib)
 
