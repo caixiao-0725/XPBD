@@ -14,7 +14,7 @@
 #include "Plane.h"
 #include "matrix.h"
 #include "Model.cuh"
-
+#include<Windows.h>
 #include<algorithm>
 typedef unsigned int uint;
 
@@ -26,11 +26,14 @@ void processInput(GLFWwindow* window);
 const unsigned int SCR_WIDTH = 800;
 const unsigned int SCR_HEIGHT = 600;
 
-#define stiffness0  50.f
+#define stiffness0  1.0f
 #define stiffness1  50.f
 #define mass  1.0f
-#define dt 0.00167f
+#define dt 0.0167f
 #define n 21
+#define STEPS 10 
+
+float sdt = dt / STEPS;
 float damp = 0.999f;
 // camera
 Camera camera(glm::vec3(0.0f, 0.5f, 3.0f));
@@ -70,7 +73,7 @@ void GLFWInit() {
     glfwSetFramebufferSizeCallback(window, framebuffer_size_callback);
     glfwSetCursorPosCallback(window, mouse_callback);
     glfwSetScrollCallback(window, scroll_callback);
-
+    glfwSwapInterval(1);
     // tell GLFW to capture our mouse
     glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
 
@@ -115,10 +118,32 @@ int main()
     Cloth MeshObj = Cloth(teapot.verts_.data(), normals_.data(), teapot.nverts(), teapot.faces_.data(), teapot.nfaces());
 
     //写个衣服布料  位置，uv，边初始长度
+    int edge_num = n * (n - 1) * 2;
     std::vector<vec3f> X(n * n);
+    std::vector<vec3f> P(n * n);
     std::vector<vec3f> V(n * n);
     std::vector<vec3f> X_color(n * n);
     std::vector<vec3i> T(2 * (n - 1) * (n - 1));
+    std::vector<int> Edge(2 * edge_num);
+    std::vector<float> m_Lambda(edge_num);
+    int count_edge = 0;
+    for (int i = 0; i < n ; i++) {
+        for (int j = 0; j < n-1; j++) {
+            Edge[count_edge] = n * i + j;
+            Edge[count_edge + 1] = n * i + j + 1;
+            count_edge += 2;
+        }
+    }
+    for (int i = 0; i < n; i++) {
+        for (int j = 0; j < n - 1; j++) {
+            Edge[count_edge] = i + j*n;
+            Edge[count_edge+1] = i + (j+1)*n;
+            count_edge += 2;
+        }
+    }
+
+
+
     for (int j = 0; j < n; j++) {
         for (int i = 0; i < n; i++) {
             X[j * n + i] = vec3f(2.5 - 5.0f * i / (n - 1), 5.0f, 2.5f - 5.0f * j / (n - 1));
@@ -133,6 +158,13 @@ int main()
             T[(n - 1) * (n - 1) + j * (n - 1) + i] = vec3i(j * n + i, (j + 1) * n + i + 1, (j + 1) * n + i);
         }
     }
+    for (int i = 0; i < X.size(); i++) {
+        P[i] = X[i];
+    }
+    float restLen = 5.0f / (n - 1);
+    float w0 = 1, w1 = 1;
+    float w = w0 + w1;
+    float alpha = 0.001f / dt / dt;
 
     Cloth clo = Cloth(X.data(), X_color.data(), X.size(), T.data(), T.size());
     // lighting info
@@ -179,10 +211,62 @@ int main()
 
         cudaGraphicsUnmapResources(1, &resource, NULL);
         */
-        for (int i = 0; i < X.size(); i++) {
-            V[i] += vec3f(0, -9.8f, 0) * dt;
-            X[i] += V[i] * dt;
+        for (int i = 0; i < edge_num; i++) {
+            m_Lambda[i] = 0;
         }
+        //presolve
+        for (int i = 0; i < X.size(); i++) {
+            if (i == 0 || i == 20) continue;
+            V[i] += vec3f(0, -9.8f, 0) * dt;
+            P[i] = X[i] + V[i] * dt;
+        }
+        for (int iter = 0; iter < STEPS; iter++) {
+            //distance constraint
+            //XPBD
+          
+            for (int i = 0; i < edge_num; i++) {
+                int id0 = Edge[2 * i];
+                int id1 = Edge[2 * i + 1];
+                vec3f grad = P[id0] - P[id1];
+                float length = grad.Length();
+                float C = length - restLen;
+                float normalizingFactor = 1.0 / length;
+                float dlambda = (-C - alpha*m_Lambda[i]) / (w + alpha);
+                vec3f correction_vector = dlambda * grad * normalizingFactor;
+                              m_Lambda[i] += dlambda;
+                
+                if (id0 != 0 && id0 != 20) {
+                    P[id0] += correction_vector * w0;
+                }
+                if (id1 != 0 && id1 != 20) {
+                    P[id1] -= correction_vector * w1;
+                }
+            }
+            
+            //PBD
+            /*
+            for (int i = 0; i < edge_num; i++) {
+                int id0 = Edge[2 * i];
+                int id1 = Edge[2 * i + 1];
+                vec3f grad = P[id0] - P[id1];
+                float length = grad.Length();
+                float C = length - restLen;
+                
+                vec3f correction_vector = stiffness0*grad/length*(-C)/w;
+                if (id0 != 0 && id0 != 20) {
+                    P[id0] += correction_vector * w0;
+                }
+                if (id1 != 0 && id1 != 20) {
+                    P[id1] -= correction_vector * w1;
+                }
+            }*/
+        }
+        for (int i = 0; i < X.size(); i++) {
+            if (i == 0 || i == 20) continue;
+            V[i] = (P[i]-X[i]) / dt;
+            X[i] = P[i];
+        }
+
 
 
         clo = Cloth(X.data(), X_color.data(), X.size(), T.data(), T.size());
@@ -238,10 +322,10 @@ int main()
         glBindTexture(GL_TEXTURE_2D, depthMap);
 
         clo.draw(shaderId);
-        MeshObj.draw(shaderId);
-        ground.draw(shaderId);
+        //MeshObj.draw(shaderId);
+        //ground.draw(shaderId);
 
-
+        //Sleep(160);
         glBindVertexArray(0);
         glfwSwapBuffers(window);
         glfwPollEvents();
